@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PromptForge — Local-first collaborative prompt engineering</title>
+  <meta name="description" content="A local-first, collaborative prompt-engineering platform. Versioned prompts, variables, test cases, and moderation. All data lives in your browser." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-grid">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <!-- Ambient falling particles -->
+  <div id="particles" aria-hidden="true"></div>
+
+  <!-- App shell -->
+  <header class="topbar glass" id="topbar"></header>
+
+  <nav class="subnav" id="subnav" aria-label="Primary"></nav>
+
+  <main id="main" class="container" tabindex="-1"></main>
+
+  <footer class="footer">
+    <div class="container footer-inner">
+      <span>PromptForge <span class="muted">v0.1 — local-first demo</span></span>
+      <span class="muted">All data stored in your browser. No server, no accounts, no tracking.</span>
+    </div>
+  </footer>
+
+  <!-- Toast host -->
+  <div id="toast-host" class="toast-host" aria-live="polite" aria-atomic="true"></div>
+
+  <!-- Modal host -->
+  <div id="modal-host" class="modal-host" aria-hidden="true"></div>
+
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

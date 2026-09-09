@@ -1,0 +1,23 @@
+[
+ {
+  "RuleID": "generic-api-key",
+  "Description": "Detected a Generic API Key, potentially exposing access to various services and sensitive operations.",
+  "StartLine": 9,
+  "EndLine": 9,
+  "StartColumn": 10,
+  "EndColumn": 40,
+  "Match": "STORE_KEY = \"REDACTED\"",
+  "Secret": "REDACTED",
+  "File": "app.js",
+  "SymlinkFile": "",
+  "Commit": "595df5cbf91e2d8c76098945e01109a59acd9863",
+  "Link": "https://github.com/mizcausevic-dev/promptforge/blob/595df5cbf91e2d8c76098945e01109a59acd9863/app.js#L9",
+  "Entropy": 3.6168747,
+  "Author": "fknmiz",
+  "Email": "150495873+fknmiz@users.noreply.github.com",
+  "Date": "2026-09-09T02:17:02Z",
+  "Message": "PromptForge v0.1: local-first collaborative prompt-engineering platform\n\nCo-authored-by: Cursor \u003ccursoragent@cursor.com\u003e",
+  "Tags": [],
+  "Fingerprint": "595df5cbf91e2d8c76098945e01109a59acd9863:app.js:generic-api-key:9"
+ }
+]
