@@ -6,9 +6,6 @@
 (function () {
   "use strict";
 
-  const STORE_NAME = "promptforge.db.v1";
-  const SEED_FLAG = "promptforge.seeded.v1";
-
   // ---------- Utilities ----------
   const $ = (sel, root = document) => root.querySelector(sel);
   const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -56,21 +53,93 @@
     return esc(body).replace(/\{\{\s*([a-zA-Z_][\w-]*)\s*\}\}/g, '<span class="var">{{$1}}</span>');
   }
 
-  // ---------- Persistence ----------
-  function loadDB() {
+  // ---------- Persistence (IndexedDB) ----------
+  // Single-object-store design: the whole db graph lives under one key.
+  // Keeps migration trivial (read, transform, write) and matches the
+  // localStorage shape we shipped in v0.1, so the migration stub is one place.
+  const DB_NAME = "promptforge";
+  const DB_STORE = "kv";
+  const DB_VERSION = 1;
+  const SCHEMA_VERSION = 2; // bump when the db graph shape changes; see migrate()
+  const LEGACY_LS_NAME = "promptforge.db.v1"; // v0.1 localStorage, one-time import
+
+  let idb = null; // opened IDBDatabase
+
+  function openIDB() {
+    return new Promise((resolve, reject) => {
+      if (!window.indexedDB) { reject(new Error("IndexedDB unavailable")); return; }
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function idbGet(key) {
+    return new Promise((resolve, reject) => {
+      const tx = idb.transaction(DB_STORE, "readonly");
+      const req = tx.objectStore(DB_STORE).get(key);
+      req.onsuccess = () => resolve(req.result === undefined ? null : req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  function idbSet(key, val) {
+    return new Promise((resolve, reject) => {
+      const tx = idb.transaction(DB_STORE, "readwrite");
+      tx.objectStore(DB_STORE).put(val, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  }
+
+  // Migrate a loaded db graph to the current SCHEMA_VERSION.
+  // v1 -> v2: no structural change needed for the seed we shipped, but this is
+  // the single chokepoint where future shape changes land. Never mutate the
+  // input; return a new object.
+  function migrate(db) {
+    if (!db || typeof db !== "object") return null;
+    let out = JSON.parse(JSON.stringify(db));
+    const from = out.schemaVersion || 1;
+    // example future step:
+    // if (from < 3) { out.prompts.forEach(p => p.newField = "x"); out.schemaVersion = 3; }
+    out.schemaVersion = SCHEMA_VERSION;
+    return out;
+  }
+
+  async function loadDB() {
+    const stored = await idbGet("db");
+    if (stored && typeof stored === "object") return migrate(stored);
+    // one-time migration from v0.1 localStorage
     try {
-      const raw = localStorage.getItem(STORE_NAME);
-      if (raw) return JSON.parse(raw);
-    } catch (e) { console.warn("load failed", e); }
+      const raw = localStorage.getItem(LEGACY_LS_NAME);
+      if (raw) { const parsed = JSON.parse(raw); return migrate(parsed); }
+    } catch (e) { /* ignore */ }
     return null;
   }
+
+  // saveDB stays fire-and-forget for the call sites, but now flushes to IDB.
+  // If the write fails, surface it once and keep the in-memory state intact
+  // so the user can export before reloading.
+  let saveInFlight = null;
   function saveDB() {
-    try { localStorage.setItem(STORE_NAME, JSON.stringify(state.db)); }
-    catch (e) { toast("Could not save to browser storage", "err"); }
+    if (!idb) return;
+    // collapse concurrent writes into the latest state
+    const snapshot = state.db;
+    const p = idbSet("db", snapshot).catch((e) => {
+      console.warn("saveDB failed", e);
+      toast("Could not persist to IndexedDB. Export your data before reloading.", "err");
+    });
+    saveInFlight = p;
+    return p;
   }
 
   function freshSeed() {
-    return JSON.parse(JSON.stringify(window.PF_SEED));
+    const s = JSON.parse(JSON.stringify(window.PF_SEED));
+    s.schemaVersion = SCHEMA_VERSION;
+    return s;
   }
 
   let state = {
@@ -79,13 +148,18 @@
     ui: { search: "", sort: "best", category: "all", tag: null },
   };
 
-  function init() {
-    const existing = loadDB();
-    if (existing && localStorage.getItem(SEED_FLAG)) {
+  async function init() {
+    try { idb = await openIDB(); }
+    catch (e) {
+      // Hard fallback: run in-memory only so the demo still renders.
+      console.warn("IndexedDB open failed; running in-memory", e);
+      idb = null;
+    }
+    const existing = await loadDB();
+    if (existing && existing.users && existing.users.length) {
       state.db = existing;
     } else {
       state.db = freshSeed();
-      localStorage.setItem(SEED_FLAG, "1");
       saveDB();
     }
     bindGlobal();
@@ -358,28 +432,63 @@
     $("#impGo").addEventListener("click", () => {
       try {
         const data = JSON.parse($("#impText").value || "{}");
-        if (!data.prompts || !data.users) throw new Error("Not a PromptForge export");
+        const report = validateImport(data);
+        if (report.errors.length) throw new Error(report.errors.join("; "));
         mergeImport(data); closeModal();
-        toast("Imported " + data.prompts.length + " prompts"); router();
+        toast("Imported " + data.prompts.length + " prompts" + (report.warnings.length ? " (" + report.warnings.length + " warnings)" : ""));
+        router();
       } catch (err) { toast("Import failed: " + err.message, "err"); }
     });
   }
 
+  // Validate an import payload before touching state. Returns {errors[], warnings[]}.
+  // errors block the import; warnings are surfaced but non-blocking.
+  function validateImport(data) {
+    const errors = [], warnings = [];
+    if (!data || typeof data !== "object") { errors.push("payload is not an object"); return { errors, warnings }; }
+    if (!Array.isArray(data.prompts)) errors.push("missing prompts[]");
+    if (!Array.isArray(data.users)) errors.push("missing users[]");
+    if (!Array.isArray(data.users) || data.users.length === 0) errors.push("users[] is empty (refusing to wipe user list)");
+    if (data.versions != null && !Array.isArray(data.versions)) errors.push("versions is not an array");
+    if (data.testCases != null && !Array.isArray(data.testCases)) errors.push("testCases is not an array");
+    if (data.folders != null && !Array.isArray(data.folders)) errors.push("folders is not an array");
+    if (data.favorites != null && typeof data.favorites !== "object") errors.push("favorites is not an object");
+
+    // per-prompt shape (only if prompts is an array)
+    if (Array.isArray(data.prompts)) {
+      data.prompts.forEach((p, i) => {
+        if (!p || typeof p !== "object") { errors.push("prompts[" + i + "] not an object"); return; }
+        if (!p.id) errors.push("prompts[" + i + "] missing id");
+        if (!p.title) warnings.push("prompts[" + i + "] missing title");
+        if (!p.currentVersionId) warnings.push("prompts[" + i + "] missing currentVersionId");
+        if (!Array.isArray(p.upvotes)) warnings.push("prompts[" + i + "] upvotes not an array (coerced to [])");
+        else if (p.upvotes.some(u => !data.users.some(uu => uu.id === u)))
+          warnings.push("prompts[" + i + "] references unknown upvote user ids");
+      });
+    }
+    return { errors, warnings };
+  }
+
   function mergeImport(data) {
+    // merge prompts by id (import wins on conflict)
     const byId = new Map(state.db.prompts.map(p => [p.id, p]));
     data.prompts.forEach(p => byId.set(p.id, p));
     state.db.prompts = Array.from(byId.values());
+    // merge versions by id
     const vById = new Map(state.db.versions.map(v => [v.id, v]));
     (data.versions || []).forEach(v => vById.set(v.id, v));
     state.db.versions = Array.from(vById.values());
-    if (data.users) state.db.users = data.users;
-    if (data.folders) state.db.folders = data.folders;
-    if (data.favorites) state.db.favorites = data.favorites;
-    if (data.testCases) {
+    // replace wholesale, but only when provided and non-empty for users
+    if (Array.isArray(data.users) && data.users.length) state.db.users = data.users;
+    if (Array.isArray(data.folders)) state.db.folders = data.folders;
+    if (data.favorites && typeof data.favorites === "object") state.db.favorites = data.favorites;
+    if (Array.isArray(data.testCases)) {
       const tById = new Map(state.db.testCases.map(t => [t.id, t]));
       data.testCases.forEach(t => tById.set(t.id, t));
       state.db.testCases = Array.from(tById.values());
     }
+    // keep schema current
+    state.db.schemaVersion = SCHEMA_VERSION;
     saveDB();
   }
 
@@ -541,6 +650,53 @@
     return canned[h % canned.length];
   }
 
+  // Naive but real eval: does the mock response satisfy the expected criteria?
+  // Heuristic:
+  //  - Pull quoted phrases ("...") from `expected`; these are explicit criteria.
+  //    If any quotes exist, ALL must appear in the response (case-insensitive),
+  //    and the token threshold is skipped (quotes are the spec).
+  //  - If there are no quoted phrases, fall back to significant tokens (len > 3):
+  //    pass if at least 60% appear in the response.
+  //  - If `expected` is empty, pass iff the response is non-empty.
+  // Returns boolean. An LLM-as-judge hook drops in here later.
+  function evalResponse(response, expected) {
+    const resp = (response || "").toLowerCase();
+    const exp = (expected || "").trim();
+    if (!exp) return resp.length > 0;
+
+    // quoted phrases: explicit criteria; require all
+    const quotes = [];
+    const qre = /"([^"]+)"|'([^']+)'|\u201c([^\u201d]+)\u201d/g;
+    let m;
+    while ((m = qre.exec(exp))) {
+      const phrase = (m[1] || m[2] || m[3] || "").toLowerCase().trim();
+      if (phrase) quotes.push(phrase);
+    }
+    if (quotes.length) {
+      for (const p of quotes) if (!resp.includes(p)) return false;
+      return true; // quotes are the spec; skip token threshold
+    }
+
+    // no quotes: significant-token threshold
+    const tokens = exp
+      .split(/[^a-zA-Z0-9]+/)
+      .map(t => t.toLowerCase())
+      .filter(t => t.length > 3);
+    const uniq = Array.from(new Set(tokens));
+    if (uniq.length === 0) return resp.length > 0;
+    const hits = uniq.filter(t => resp.includes(t)).length;
+    return hits / uniq.length >= 0.6;
+  }
+
+  // Compute and persist the verdict for a (test, version) pair.
+  function evalTest(t, versionId) {
+    const r = t.results && t.results[versionId];
+    if (!r) return null;
+    const pass = evalResponse(r.response, t.expected);
+    r.pass = pass;
+    return pass;
+  }
+
   // ---------- Detail view ----------
   VIEWS.prompt = function (params) {
     const p = promptById(params.id);
@@ -692,13 +848,19 @@
                 ${versForTable.map(vr => {
                   const r = t.results && t.results[vr.id];
                   if (!r) return `<td><span class="pill unset">—</span></td>`;
-                  return `<td title="${escAttr(r.response)}"><span class="pill ${r.pass ? "pass" : "fail"}">${r.pass ? "PASS" : "FAIL"}</span><div class="muted" style="font-size:.72rem;margin-top:.2rem;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.response)}</div></td>`;
+                  const cls = r.pass === true ? "pass" : r.pass === false ? "fail" : "unset";
+                  const label = r.pass === true ? "PASS" : r.pass === false ? "FAIL" : "—";
+                  return `<td title="${escAttr(r.response)}">
+                    <span class="pill ${cls}" data-verdict="${t.id}/${vr.id}">${label}</span>
+                    <div class="muted" style="font-size:.72rem;margin-top:.2rem;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(r.response)}</div>
+                  </td>`;
                 }).join("")}
                 <td><button class="btn btn-sm btn-ghost" data-runtest="${t.id}">Re-run</button></td>
               </tr>`).join("")}
           </tbody>
         </table>
-      </div>`;
+      </div>
+      <p class="muted" style="font-size:.76rem;margin-top:.6rem">Verdicts auto-evaluate on run: quoted phrases in Expected must all appear in the response, and at least 60% of its significant words must match. Click a pill to override manually.</p>`;
   }
 
   // continued in next chunk...
@@ -910,6 +1072,7 @@
     $$(`[data-flag="${pid}"]`).forEach(b => b.addEventListener("click", () => setMod(pid, "flagged")));
     $$(`[data-addtest="${pid}"]`).forEach(b => b.addEventListener("click", () => addTestCase(pid)));
     $$(`[data-runtest]`).forEach(b => b.addEventListener("click", () => runTest(b.dataset.runtest)));
+    $$(`[data-verdict]`).forEach(b => b.addEventListener("click", () => toggleVerdict(b.dataset.verdict)));
 
     // version switch (view only; clicking shows that version body in a modal)
     $$(`[data-version]`).forEach(b => b.addEventListener("click", () => {
@@ -974,9 +1137,16 @@
       copyBtn.addEventListener("click", () => {
         const text = copyBtn.dataset.text;
         if (text == null) return;
+        const done = () => {
+          const orig = copyBtn.textContent;
+          copyBtn.textContent = "✓ Copied";
+          copyBtn.style.background = "var(--color-cash)";
+          copyBtn.style.color = "#042024";
+          setTimeout(() => { copyBtn.textContent = orig; copyBtn.style.background = ""; copyBtn.style.color = ""; }, 1400);
+        };
         navigator.clipboard.writeText(text).then(
-          () => toast("Copied resolved prompt to clipboard"),
-          () => { fallbackCopy(text); toast("Copied resolved prompt"); }
+          () => { done(); toast("Copied resolved prompt to clipboard"); },
+          () => { fallbackCopy(text); done(); toast("Copied resolved prompt"); }
         );
       });
     }
@@ -1032,10 +1202,11 @@
       if (!name || !expected) return toast("Name and expected outcome are required", "err");
       const inputs = {}; $$("[data-tvar]").forEach(el => inputs[el.dataset.tvar] = el.value);
       const t = { id: uid("t"), promptId: pid, name, expected, notes: $("#t_notes").value.trim(), inputs, results: {} };
-      // run against every version
+      // run against every version and auto-evaluate
       versionsForPrompt(pid).forEach(vr => {
         const resp = mockModel(vr.body, inputs);
         t.results[vr.id] = { response: resp, pass: null, notes: "" };
+        evalTest(t, vr.id);
       });
       state.db.testCases.push(t);
       saveDB(); closeModal(); router();
@@ -1050,9 +1221,21 @@
       const resp = mockModel(vr.body, t.inputs || {});
       const existing = t.results && t.results[vr.id];
       t.results[vr.id] = { response: resp, pass: existing ? existing.pass : null, notes: existing ? existing.notes : "" };
+      evalTest(t, vr.id); // re-evaluate; overrides manual verdict with computed one
     });
     saveDB(); router();
-    toast("Re-ran test against all versions");
+    toast("Re-ran and re-evaluated against all versions");
+  }
+
+  // Toggle a verdict pill: unset -> pass -> fail -> unset. Persists immediately.
+  function toggleVerdict(key) {
+    const [tid, vid] = key.split("/");
+    const t = state.db.testCases.find(x => x.id === tid); if (!t) return;
+    const r = t.results && t.results[vid]; if (!r) return;
+    if (r.pass === null) r.pass = true;
+    else if (r.pass === true) r.pass = false;
+    else r.pass = null;
+    saveDB(); router();
   }
 
   // ---------- Editor bindings ----------
@@ -1199,6 +1382,12 @@
   }
 
   // continued in next chunk...
-  window.PF = { state, go, toast, openModal, closeModal, uid, esc, extractVars, resolveVars, highlightVars, timeAgo, fmtDate, saveDB, init };
-  init();
+  window.PF = {
+    state, go, toast, openModal, closeModal, uid, esc,
+    extractVars, resolveVars, highlightVars, timeAgo, fmtDate,
+    saveDB, init, evalResponse, validateImport, mergeImport, parseHash,
+    SCHEMA_VERSION,
+  };
+  // Skip auto-init in the test harness (tests.html sets this before app.js loads).
+  if (!window.PF_TEST_MODE) init();
 })();

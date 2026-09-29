@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PromptForge — tests</title>
+  <link rel="stylesheet" href="styles.css" />
+  <style>
+    .test-summary { font-size: 1.2rem; font-weight: 700; padding: .8rem 1rem; border-radius: 10px; margin-bottom: 1rem; }
+    .test-summary.pass { background: rgba(47,213,122,.15); color: var(--color-cash); border: 1px solid rgba(47,213,122,.4); }
+    .test-summary.fail { background: rgba(255,45,85,.15); color: var(--color-scam); border: 1px solid rgba(255,45,85,.4); }
+    .test-row { display: flex; gap: .5rem; align-items: baseline; padding: .4rem .7rem; border-bottom: 1px solid rgba(102,252,241,.08); font-family: var(--font-mono); font-size: .85rem; }
+    .test-row.pass .test-mark { color: var(--color-cash); }
+    .test-row.fail .test-mark { color: var(--color-scam); }
+    .test-row.fail .test-name { color: #eaf9fb; }
+    .test-mark { font-weight: 700; width: 1.2rem; }
+    .test-name { color: var(--color-text); }
+    .test-err { color: var(--color-scam); font-size: .78rem; }
+    .tests-wrap { max-width: 760px; margin: 2rem auto; }
+  </style>
+</head>
+<body class="bg-grid">
+  <main class="container tests-wrap">
+    <h1 class="section-title">PromptForge unit tests</h1>
+    <p class="section-sub">Pure-logic tests for resolveVars, extractVars, evalResponse, validateImport, mergeImport, and parseHash. No framework. Runs in the browser against the real app.js internals.</p>
+    <div id="results">Running…</div>
+  </main>
+  <script>window.PF_TEST_MODE = true;</script>
+  <script src="seed.js"></script>
+  <script src="app.js"></script>
+  <script src="tests.js"></script>
+</body>
+</html>
