@@ -1,4 +1,4 @@
-# PromptForge
+# Verificanda
 
 A local-first, collaborative prompt-engineering platform. Versioned prompts, named variables, side-by-side test cases against mock model responses, and a moderation queue. No backend, no accounts. All data lives in your browser (IndexedDB).
 
@@ -26,7 +26,7 @@ npx serve .
 # then open the printed URL
 ```
 
-State persists in IndexedDB (`promptforge` database, `kv` store). The schema is versioned (`SCHEMA_VERSION`); a `migrate()` chokepoint handles future shape changes, and v0.1 localStorage data is imported once on first load. Use **Reset demo data** on the browse page to restore the original seed.
+State persists in IndexedDB (`verificanda` database, `kv` store). The schema is versioned (`SCHEMA_VERSION`); a `migrate()` chokepoint handles future shape changes, and v0.1 localStorage data (under the prior project name) is imported once on first load. Use **Reset demo data** on the browse page to restore the original seed.
 
 Run the unit tests by opening `tests.html` (35 tests, no framework, runs against the real `app.js` internals).
 

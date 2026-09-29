@@ -1,5 +1,5 @@
 /* ============================================================
-   PromptForge — tests.js
+   Verificanda — tests.js
    Framework-free unit tests for the pure logic. Loaded by tests.html
    after app.js (with PF_TEST_MODE=true so init() does not auto-run).
    Exposes results on window.PF_TEST_RESULTS and renders into #results.

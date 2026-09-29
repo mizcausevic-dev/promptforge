@@ -1,7 +1,7 @@
 /* ============================================================
-   PromptForge — app.js
+   Verificanda — app.js
    Local-first SPA: state, persistence, routing, all views.
-   Vanilla JS, no dependencies. Data in localStorage.
+   Vanilla JS, no dependencies. Data in IndexedDB.
    ============================================================ */
 (function () {
   "use strict";
@@ -57,11 +57,11 @@
   // Single-object-store design: the whole db graph lives under one key.
   // Keeps migration trivial (read, transform, write) and matches the
   // localStorage shape we shipped in v0.1, so the migration stub is one place.
-  const DB_NAME = "promptforge";
+  const DB_NAME = "verificanda";
   const DB_STORE = "kv";
   const DB_VERSION = 1;
   const SCHEMA_VERSION = 2; // bump when the db graph shape changes; see migrate()
-  const LEGACY_LS_NAME = "promptforge.db.v1"; // v0.1 localStorage, one-time import
+  const LEGACY_LS_NAME = "promptforge.db.v1"; // v0.1 localStorage (under the prior project name), one-time import
 
   let idb = null; // opened IDBDatabase
 
@@ -255,9 +255,9 @@
     const u = currentUser();
     const bar = $("#topbar");
     bar.innerHTML = `
-      <a class="brand" href="#/browse" aria-label="PromptForge home">
-        <span class="logo">PF</span>
-        <span class="name">PromptForge</span>
+      <a class="brand" href="#/browse" aria-label="Verificanda home">
+        <span class="logo">V</span>
+        <span class="name">Verificanda</span>
         <span class="tag">local-first</span>
       </a>
       <div class="topbar-search">
@@ -409,7 +409,7 @@
     const blob = new Blob([JSON.stringify(state.db, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "promptforge-export-" + new Date().toISOString().slice(0, 10) + ".json";
+    a.download = "verificanda-export-" + new Date().toISOString().slice(0, 10) + ".json";
     a.click(); URL.revokeObjectURL(a.href);
     toast("Exported " + state.db.prompts.length + " prompts to JSON");
   }
@@ -418,7 +418,7 @@
     openModal(`
       <button class="close" aria-label="Close">&times;</button>
       <h3>Import JSON</h3>
-      <p class="muted" style="font-size:.86rem">Paste exported PromptForge JSON, or pick a file. Merges prompts by id; replaces users, folders, and favorites.</p>
+      <p class="muted" style="font-size:.86rem">Paste exported Verificanda JSON, or pick a file. Merges prompts by id; replaces users, folders, and favorites.</p>
       <div class="field"><label for="impFile">File</label><input type="file" id="impFile" accept="application/json" /></div>
       <div class="field"><label for="impText">Or paste JSON</label><textarea id="impText" style="min-height:160px"></textarea></div>
       <div class="flex"><button class="btn btn-primary" id="impGo">Import</button></div>

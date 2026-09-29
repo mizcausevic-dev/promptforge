@@ -1,5 +1,5 @@
 /* ============================================================
-   PromptForge — seed.js
+   Verificanda — seed.js
    Mock users + pre-seeded prompts, versions, comments, test cases.
    Exposes window.PF_SEED used by app.js on first run.
    ============================================================ */
