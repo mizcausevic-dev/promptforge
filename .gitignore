@@ -4,3 +4,4 @@ node_modules/
 serve.log
 *.log
 .playwright-mcp/
+leaks.json
